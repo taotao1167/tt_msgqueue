@@ -11,6 +11,7 @@ int tt_sem_init(tt_sem_t *sem, int pshared, unsigned long value) {
 
 	sem->isvalid = 0;
 	sem->count = value;
+	sem->waiting = 0;
 	ret = pthread_mutex_init(&(sem->lock), NULL);
 	if (ret != 0) {
 		return -1;
@@ -43,6 +44,22 @@ int tt_sem_destroy(tt_sem_t *sem) {
 	return 0;
 }
 
+int tt_sem_getvalue(tt_sem_t *sem, int *sval) {
+	if (!sem->isvalid) {
+		return -1;
+	}
+	pthread_mutex_lock(&(sem->lock));
+	if (sval != NULL) {
+		if (sem->count == 0) {
+			*sval = -sem->waiting;
+		} else {
+			*sval = sem->count;
+		}
+	}
+	pthread_mutex_unlock(&(sem->lock));
+	return 0;
+}
+
 int tt_sem_post(tt_sem_t *sem) {
 	if (!sem->isvalid) {
 		return -1;
@@ -63,7 +80,9 @@ int tt_sem_wait(tt_sem_t *sem) {
 		sem->count--;
 	} else {
 		while (sem->count == 0) {
+			sem->waiting++;
 			pthread_cond_wait(&(sem->cond), &(sem->lock));
+			sem->waiting--;
 		}
 		sem->count--;
 	}

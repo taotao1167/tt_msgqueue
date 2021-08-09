@@ -5,6 +5,7 @@
 #include <time.h>
 
 /* #include "tt_semaphore.h" use self defined semaphore */
+// #include "tt_semaphore.h"
 #ifndef __TT_SEMAPHORE_H__
 	#include <semaphore.h>
 	#define tt_sem_t sem_t
@@ -27,9 +28,9 @@ typedef struct MSG_Q_ENTRY{
 }MSG_Q_ENTRY;
 
 typedef struct MSG_Q{
-	tt_sem_t semaphore;
+	tt_sem_t get_sem;
+	tt_sem_t put_sem;
 	pthread_mutex_t lock;
-	long int length;
 	long int maxlen;
 	struct MSG_Q_ENTRY *head;
 	struct MSG_Q_ENTRY *tail;
@@ -38,6 +39,7 @@ typedef struct MSG_Q{
 extern int msgq_init(MSG_Q *msg_q, long int maxlen);
 extern int msgq_destroy(MSG_Q *msg_q);
 extern int msg_put(MSG_Q *msg_q, void *entry);
+extern int msg_tryput(MSG_Q *msg_q, void *entry);
 extern void *msg_get(MSG_Q *msg_q);
 extern void *msg_tryget(MSG_Q *msg_q);
 extern void *msg_timedget(MSG_Q *msg_q, const struct timespec *timeout);

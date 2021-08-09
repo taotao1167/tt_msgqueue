@@ -137,7 +137,18 @@ void *thread2_func(void *para) {
 	pthread_exit(NULL);
 }
 int main() {
+	int i = 0;
 	int ret = 0;
+	char *pcontent = NULL;
+
+	msgq_init(&g_msgq, 3);
+	for (i = 0; i < 10; i++) {
+		pcontent = (char *)malloc(20);
+		printf("before msg_put\n");
+		ret = msg_tryput(&g_msgq, pcontent);
+		printf("after msg_put, ret %d\n", ret);
+	}
+	return 0;
 	pthread_t thread1 = 0, thread2 = 0;
 	msgq_init(&g_msgq, 0);
 	ret = pthread_create(&thread1, NULL, thread1_func, NULL);

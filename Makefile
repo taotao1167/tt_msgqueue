@@ -3,7 +3,8 @@ default_target: app
 APPNAME := app
 
 #source file
-OBJS := tt_semaphore.o tt_msgqueue.o test_msgqueue.o
+# OBJS := tt_semaphore.o tt_msgqueue.o test_msgqueue.o
+OBJS := tt_msgqueue.o test_msgqueue.o
 
 #compile and lib parameter
 CC      := gcc

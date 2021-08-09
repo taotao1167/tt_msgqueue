@@ -17,21 +17,17 @@
 #endif
 
 int msgq_init(MSG_Q *msg_q, long int maxlen) {
-	tt_sem_init(&(msg_q->semaphore), 0, 0);
+	tt_sem_init(&(msg_q->get_sem), 0, 0);
 	pthread_mutex_init(&(msg_q->lock), NULL);
 	msg_q->head = NULL;
 	msg_q->tail = NULL;
-	msg_q->length = 0;
 	msg_q->maxlen = maxlen;
+	if (maxlen != 0) {
+		tt_sem_init(&(msg_q->put_sem), 0, (unsigned long)maxlen);
+	}
 	return 0;
 }
-
-int msg_put(MSG_Q *msg_q, void *entry) {
-	pthread_mutex_lock(&(msg_q->lock));
-	if (msg_q->maxlen && msg_q->length >= msg_q->maxlen) {
-		pthread_mutex_unlock(&(msg_q->lock));
-		return -1;
-	}
+static int _msg_put(MSG_Q *msg_q, void *entry) {
 	if (NULL == msg_q->head) {
 		msg_q->head = (struct MSG_Q_ENTRY *)MY_MALLOC(sizeof(struct MSG_Q_ENTRY));
 		if (NULL == msg_q->head) {
@@ -49,9 +45,54 @@ int msg_put(MSG_Q *msg_q, void *entry) {
 	}
 	memset(msg_q->tail, 0, sizeof(struct MSG_Q_ENTRY));
 	msg_q->tail->content = entry;
-	msg_q->length++;
+	return 0;
+}
+
+int msg_tryput(MSG_Q *msg_q, void *entry) {
+	int ret = 0;
+
+	while (msg_q->maxlen != 0) {
+		ret = tt_sem_trywait(&(msg_q->put_sem));
+		if (ret != 0) {
+			if (errno == EINTR) {
+				continue;
+			} else {
+				return -1;
+			}
+		}
+		break;
+	}
+	pthread_mutex_lock(&(msg_q->lock));
+	ret = _msg_put(msg_q, entry);
 	pthread_mutex_unlock(&(msg_q->lock));
-	tt_sem_post(&(msg_q->semaphore));
+	if (ret != 0) {
+		return -1;
+	}
+	tt_sem_post(&(msg_q->get_sem));
+	return 0;
+}
+
+int msg_put(MSG_Q *msg_q, void *entry) {
+	int ret = 0;
+
+	while (msg_q->maxlen != 0) {
+		ret = tt_sem_wait(&(msg_q->put_sem));
+		if (ret != 0) {
+			if (errno == EINTR) {
+				continue;
+			} else {
+				return -1;
+			}
+		}
+		break;
+	}
+	pthread_mutex_lock(&(msg_q->lock));
+	ret = _msg_put(msg_q, entry);
+	pthread_mutex_unlock(&(msg_q->lock));
+	if (ret != 0) {
+		return -1;
+	}
+	tt_sem_post(&(msg_q->get_sem));
 	return 0;
 }
 
@@ -71,8 +112,10 @@ static void *_msg_get(MSG_Q *msg_q) {
 	tmp = msg_q->head;
 	msg_q->head = msg_q->head->next;
 	MY_FREE(tmp);
-	msg_q->length--;
 	pthread_mutex_unlock(&(msg_q->lock));
+	if (msg_q->maxlen != 0) {
+		tt_sem_post(&(msg_q->put_sem));
+	}
 	return entry;
 }
 
@@ -80,7 +123,7 @@ void *msg_get(MSG_Q *msg_q) {
 	int ret = 0;
 
 	while (1) {
-		ret = tt_sem_wait(&(msg_q->semaphore));
+		ret = tt_sem_wait(&(msg_q->get_sem));
 		if (ret != 0) {
 			if (errno == EINTR) {
 				continue;
@@ -97,7 +140,7 @@ void *msg_tryget(MSG_Q *msg_q) {
 	int ret = 0;
 
 	while (1) {
-		ret = tt_sem_trywait(&(msg_q->semaphore));
+		ret = tt_sem_trywait(&(msg_q->get_sem));
 		if (ret != 0) {
 			if (errno == EINTR) {
 				continue;
@@ -123,7 +166,7 @@ void *msg_timedget(MSG_Q *msg_q, const struct timespec *timeout) {
 		abs_timeout.tv_nsec -= 1000000000;
 	}
 	while (1) {
-		ret = tt_sem_timedwait(&(msg_q->semaphore), &abs_timeout);
+		ret = tt_sem_timedwait(&(msg_q->get_sem), &abs_timeout);
 		if (ret != 0) {
 			if (errno == EINTR) {
 				continue;
@@ -140,7 +183,7 @@ void *msg_timedget(MSG_Q *msg_q, const struct timespec *timeout) {
 	int ret = 0;
 
 	while (1) {
-		ret = tt_sem_timedwait(&(msg_q->semaphore), timeout);
+		ret = tt_sem_timedwait(&(msg_q->get_sem), timeout);
 		if (ret != 0) {
 			if (errno == EINTR) {
 				continue;
@@ -155,16 +198,20 @@ void *msg_timedget(MSG_Q *msg_q, const struct timespec *timeout) {
 #endif
 
 int msg_getvalue(MSG_Q *msg_q, long int *len) {
-	pthread_mutex_lock(&(msg_q->lock));
-	*len = msg_q->length;
-	pthread_mutex_unlock(&(msg_q->lock));
+	int sem_value = 0;
+
+	tt_sem_getvalue(&(msg_q->get_sem), &sem_value);
+	*len = (long int)sem_value;
 	return 0;
 }
 
 int msgq_destroy(MSG_Q *msg_q) {
 	MSG_Q_ENTRY *p_cur = NULL, *p_next = NULL;
 
-	tt_sem_destroy(&(msg_q->semaphore));
+	tt_sem_destroy(&(msg_q->get_sem));
+	if (msg_q->maxlen != 0) {
+		tt_sem_destroy(&(msg_q->put_sem));
+	}
 	pthread_mutex_destroy(&(msg_q->lock));
 	for (p_cur = msg_q->head; p_cur != NULL; p_cur = p_next) {
 		p_next = p_cur->next;
@@ -173,7 +220,6 @@ int msgq_destroy(MSG_Q *msg_q) {
 	}
 	msg_q->head = NULL;
 	msg_q->tail = NULL;
-	msg_q->length = 0;
 	msg_q->maxlen = 0;
 	return 0;
 }
